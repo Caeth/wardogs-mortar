@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#101417">
+<title>WARDOGS L81 Mortar Calculator</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg:#0d1114;
+    --panel:#151b1f;
+    --panel2:#101619;
+    --line:#293239;
+    --text:#ecf2f4;
+    --muted:#92a0a8;
+    --accent:#f1b24a;
+    --good:#77d79b;
+    --bad:#ff7979;
+  }
+  * { box-sizing:border-box; }
+  html,body { margin:0; min-height:100%; background:var(--bg); color:var(--text); font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; }
+  body { display:grid; place-items:center; padding:24px; }
+  .app { width:min(760px,100%); }
+  header { margin-bottom:18px; }
+  h1 { margin:0; font-size:clamp(1.45rem,4vw,2rem); letter-spacing:.02em; }
+  .sub { color:var(--muted); margin-top:5px; font-size:.94rem; }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:18px; box-shadow:0 14px 38px rgba(0,0,0,.22); }
+  .inputs { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  label { display:block; color:var(--muted); font-size:.78rem; font-weight:700; letter-spacing:.09em; text-transform:uppercase; margin-bottom:7px; }
+  input {
+    width:100%; border:1px solid var(--line); background:#0b1013; color:var(--text);
+    border-radius:10px; padding:13px 14px; font:inherit; font-size:1rem; outline:none;
+  }
+  input:focus { border-color:var(--accent); box-shadow:0 0 0 3px rgba(241,178,74,.12); }
+  .hint { margin-top:6px; color:#718088; font-size:.76rem; }
+  .actions { display:flex; flex-wrap:wrap; gap:9px; margin-top:14px; }
+  button {
+    border:1px solid var(--line); background:#1b2429; color:var(--text); border-radius:9px;
+    padding:9px 12px; font:inherit; cursor:pointer;
+  }
+  button:hover { border-color:#46545d; }
+  button.primary { background:var(--accent); color:#15110a; border-color:var(--accent); font-weight:800; }
+  .divider { height:1px; background:var(--line); margin:18px 0; }
+  .status { min-height:22px; margin-bottom:10px; font-size:.88rem; font-weight:700; }
+  .status.good { color:var(--good); }
+  .status.bad { color:var(--bad); }
+  .solution { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
+  .metric { background:var(--panel2); border:1px solid var(--line); border-radius:11px; padding:14px; }
+  .metric .name { color:var(--muted); font-size:.72rem; font-weight:800; letter-spacing:.1em; text-transform:uppercase; }
+  .metric .value { margin-top:5px; font-size:clamp(1.45rem,5vw,2.15rem); font-weight:800; font-variant-numeric:tabular-nums; }
+  .metric .unit { color:var(--muted); font-size:.8rem; margin-left:3px; }
+  .detail { margin-top:12px; color:var(--muted); font-size:.83rem; line-height:1.5; }
+  footer { color:#66747c; font-size:.72rem; line-height:1.5; padding:13px 4px 0; }
+  .hidden { visibility:hidden; }
+  @media (max-width:620px) {
+    body { padding:14px; align-items:start; }
+    .inputs,.solution { grid-template-columns:1fr; }
+  }
+</style>
+</head>
+<body>
+<main class="app">
+  <header>
+    <h1>WARDOGS · L81 Mortar</h1>
+    <div class="sub">Offline coordinate-to-fire-solution calculator</div>
+  </header>
+
+  <section class="panel">
+    <div class="inputs">
+      <div>
+        <label for="mortar">Mortar coordinates</label>
+        <input id="mortar" autocomplete="off" spellcheck="false" placeholder="98.43, 110.38">
+        <div class="hint">Accepts e.g. <b>98.43, 110.38</b> or <b>x98.43 y110.38</b></div>
+      </div>
+      <div>
+        <label for="target">Target coordinates</label>
+        <input id="target" autocomplete="off" spellcheck="false" placeholder="102.16, 108.22">
+        <div class="hint">1 WARDOGS coordinate unit = 100 m</div>
+      </div>
+    </div>
+
+    <div class="actions">
+      <button class="primary" id="calculate">Calculate</button>
+      <button id="swap">Swap</button>
+      <button id="copy">Copy solution</button>
+      <buttton id="clear">Clear</button>
+    </div>
+
+    <div class="divider"></div>
+
+    <div id="status" class="status">Enter mortar and target coordinates.</div>
+
+    <div id="solution" class="solution hidden">
+      <div class="metric">
+        <div class="name">Bearing</div>
+        <div><span class="value" id="bearing">—</span><span class="unit">°</span></div>
+      </div>
+      <div class="metric">
+        <div class="name">Range</div>
+        <div><span class="value" id="range">—</span><span class="unit">m</span></div>
+      </div>
+      <div class="metric">
+        <div class="name">Elevation</div>
+        <div><span class="value" id="elevation">—</span><span class="unit">mil</span></div>
+      </div>
+    </div>
+
+    <div id="detail" class="detail"></div>
+  </section>
+
+  <footer>
+    Flat-ground L81 solution. Community firing table embedded locally; supported firing envelope is 132–684 m.
+    Elevation is linearly interpolated between table entries. Terrain height is not corrected in this lightweight version.
+  </footer>
+</main>
+
+<script>
+(() => {
+  "use strict";
+
+  // [range metres, sight elevation mil]
+  // Community dataset from apollyon-sys/wardogs-calculator (MIT-licensed project).
+  const L81 = [[80,950],[87,940],[93,930],[99,920],[105,910],[110,900],[115,890],[118,880],[122,870],[127,860],[132,850],[140,840],[151,830],[163,820],[175,810],[187,800],[198,790],[208,780],[219,770],[229,760],[239,750],[250,740],[260,730],[270,720],[280,710],[290,700],[300,690],[310,680],[319,670],[329,660],[339,650],[348,640],[358,630],[367,620],[376,610],[385,600],[394,590],[403,580],[412,570],[420,560],[429,550],[437,540],[446,530],[454,520],[462,510],[470,500],[478,490],[486,480],[494,470],[501,460],[509,450],[516,440],[524,430],[531,420],[538,410],[545,400],[552,390],[559,380],[565,370],[572,360],[578,350],[585,340],[591,330],[597,320],[603,310],[609,300],[615,290],[620,280],[626,270],[631,260],[636,250],[641,240],[646,230],[651,220],[656,210],[661,200],[666,190],[670,180],[675,170],[680,160],[684,150],[688,140],[693,130],[697,120]];
+  const MIN_RANGE = 132;
+  const MAX_RANGE = 684;
+  const METRES_PER_COORD = 100;
+
+  const $ = id => document.getElementById(id);
+  const mortar = $("mortar");
+  const target = $("target");
+  const status = $("status");
+  const solution = $("solution");
+  const detail = $("detail");
+  const bearingEl = $("bearing");
+  const rangeEl = $("range");
+  const elevationEl = $("elevation");
+
+  function parseCoord(text) {
+    if (!text || !text.trim()) return null;
+
+    // Prefer explicitly labelled x/y values when present.
+    const xMatch = text.match(/x\s*[:=]?\s*(-?\d+(?:\.\d+)?)/i);
+    const yMatch = text.match(/y\s*[:=]?\s*(-?\d+(?:\.\d+)?)/i);
+    if (xMatch && yMatch) {
+      return { x: Number(xMatch[1]), y: Number(yMatch[1]) };
+    }
+
+    // Otherwise use the first two numbers in the string.
+    const nums = text.match(/-?\d+(?:\.\d+)?/g);
+    if (!nums || nums.length < 2) return null;
+    return { x: Number(nums[0]), y: Number(nums[1]) };
+  }
+
+  function interpolateElevation(range) {
+    if (range < MIN_RANGE || range > MAX_RANGE) return null;
+
+    for (let i = 0; i < L81.length - 1; i++) {
+      const [r1, m1] = L81[i];
+      const [r2, m2] = L81[i + 1];
+      if (range >= r1 && range <= r2) {
+        if (r1 === r2) return m1;
+        const t = (range - r1) / (r2 - r1);
+        return m1 + t * (m2 - m1);
+      }
+    }
+    return null;
+  }
+
+  function compass(deg) {
+    const names = ["N","NNE","NE","ENE","E","ESE","SE","SSE","S","SSW","SW","WSW","W","WNW","NW","NNW"];
+    return names[Math.round(deg / 22.5) % 16];
+  }
+
+  function setStatus(message, kind = "") {
+    status.textContent = message;
+    status.className = "status" + (kind ? " " + kind : "");
+  }
+
+  function calculate() {
+    const m = parseCoord(mortar.value);
+    const t = parseCoord(target.value);
+
+    if (!m || !t) {
+      solution.classList.add("hidden");
+      detail.textContent = "";
+      setStatus("Enter two valid coordinate pairs.");
+      return null;
+    }
+
+    const east = (t.x - m.x) * METRES_PER_COORD;
+    const north = (t.y - m.y) * METRES_PER_COORD;
+    const range = Math.hypot(east, north);
+    const bearing = (Math.atan2(east, north) * 180 / Math.PI + 360) % 360;
+    const elevation = interpolateElevation(range);
+
+  bearingEl.textContent = bearing.toFixed(1);
+  rangeEl.textContent = range.toFixed(0);
+
+  solution.classList.remove("hidden");
+
+  if (elevation === null) {
+    elevationEl.textContent = "—";
+    const side = range < MIN_RANGE ? "too close" : "too far";
+    setStatus(`OUT OF RANGE · ${side}`, "bad");
+    detail.textContent = `Bearing ${bearing.toFixed(1)}° (${compass(bearing)}). L81 supported range: ${MIN_RANGE}–${MAX_RANGE} m.`;
+  } else {
+    elevationEl.textContent = elevation.toFixed(0);
+    setStatus("TARGET IN RANGE", "good");
+    detail.textContent =
+      `Aim ${bearing.toFixed(1)}° (${compass(bearing)}), range ${range.toFixed(1)} m. ` +
+      `Interpolated sight setting ${elevation.toFixed(1)} mil → display rounded to ${elevation.toFixed(0)} mil.`;
+  }
+
+  localStorage.setItem("wardogsMortar", mortar.value);
+  localStorage.setItem("wardogsTarget", target.value);
+
+  return { m, t, east, north, range, bearing, elevation };
+  }
+
+  $("calculate").addEventListener("click", calculate);
+
+  $("swap").addEventListener("click", () => {
+    const tmp = mortar.value;
+    mortar.value = target.value;
+    target.value = tmp;
+    calculate();
+  });
+
+  $("clear").addEventListener("click", () => {
+    mortar.value = "";
+    target.value = "";
+    localStorage.removeItem("wardogsMortar");
+    localStorage.removeItem("wardogsTarget");
+    solution.classList.add("hidden");
+    detail.textContent = "";
+    setStatus("Enter mortar and target coordinates.");
+    mortar.focus();
+  });
+
+  $("copy").addEventListener("click", async () => {
+    const r = calculate();
+    if (!r) return;
+    let text = `WARDOGS L81 FIRE SOLUTION\nBearing: ${r.bearing.toFixed(1)}° (${compass(r.bearing)})\nRange: ${r.range.toFixed(1)} m`;
+    text += r.elevation === null ? "\nElevation: OUT OF RANGE" : `\nElevation: ${r.elevation.toFixed(0)} mil`;
+    try {
+      await navigator.clipboard.writeText(text);
+      setStatus("Solution copied.", r.elevation === null ? "bad" : "good");
+    } catch {
+      setStatus("Clipboard access was blocked by the browser.");
+    }
+  });
+
+  [mortar, target].forEach(el => {
+    el.addEventListener("input", () => {
+      if (parseCoord(mortar.value) && parseCoord(target.value)) calculate();
+    });
+    el.addEventListener("keydown", e => {
+      if (e.key === "Enter") calculate();
+    });
+  });
+
+  mortar.value = localStorage.getItem("wardogsMortar") || "";
+  target.value = localStorage.getItem("wardogsTarget") || "";
+  if (mortar.value && target.value) calculate();
+  else mortar.focus();
+})();
+</script>
+</body>
+</html>
